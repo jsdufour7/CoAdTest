@@ -1,0 +1,27 @@
+{
+  "name": "@coadvisor/fnae",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Financial Needs Assessment Engine — questionnaire public, moteur de calcul du portrait financier, génération de leads (Sprint 3)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@coadvisor/auth": "workspace:*",
+    "@coadvisor/core-platform": "workspace:*",
+    "@coadvisor/database": "workspace:*",
+    "@coadvisor/types": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2"
+  }
+}

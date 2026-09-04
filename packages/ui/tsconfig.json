@@ -1,0 +1,4 @@
+{
+  "extends": "@coadvisor/config/tsconfig.nextjs.json",
+  "include": ["src"]
+}

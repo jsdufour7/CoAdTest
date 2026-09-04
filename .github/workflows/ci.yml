@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: coadvisor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d coadvisor"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://coadvisor_app:coadvisor_app_dev_password@localhost:5432/coadvisor
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/coadvisor
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      - name: Créer le rôle applicatif NOBYPASSRLS
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d coadvisor -f docker/db/init.sql
+
+      - name: Appliquer les migrations
+        run: pnpm db:migrate
+
+      - name: Tests (unitaires + intégration RLS)
+        run: RUN_DB_TESTS=1 pnpm test
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build

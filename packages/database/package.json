@@ -1,0 +1,31 @@
+{
+  "name": "@coadvisor/database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Couche données CoAdvisor — Prisma, PostgreSQL, RLS multi-tenant",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "dotenv -e ../../.env -- prisma generate",
+    "migrate": "dotenv -e ../../.env -- prisma migrate deploy",
+    "migrate:dev": "dotenv -e ../../.env -- prisma migrate dev",
+    "seed": "dotenv -e ../../.env -- tsx src/seed.ts",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "argon2": "^0.41.1",
+    "dotenv-cli": "^7.4.2",
+    "eslint": "^9.17.0",
+    "prisma": "^6.2.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2"
+  }
+}

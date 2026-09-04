@@ -1,0 +1,27 @@
+{
+  "name": "@coadvisor/health-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Financial Health Engine — FHI (10 catégories), explications FR-FHE-002, historique et progression, portail particulier (Sprint 4)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@coadvisor/auth": "workspace:*",
+    "@coadvisor/core-platform": "workspace:*",
+    "@coadvisor/database": "workspace:*",
+    "@coadvisor/types": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@coadvisor/documents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Coffre documentaire chiffré, partage, rapports PDF et export Loi 25 (Sprint 7, ADR-010) — adaptateur CoAdvisor du moteur de signature @coadvisor/signdoc (ADR-012)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./labels": "./src/labels.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seed:demo": "dotenv -e ../../.env -- tsx scripts/seed-demo-documents.ts",
+    "backup:run": "dotenv -e ../../.env -- tsx scripts/run-backup.ts"
+  },
+  "dependencies": {
+    "@coadvisor/ai": "workspace:*",
+    "@coadvisor/analytics": "workspace:*",
+    "@coadvisor/auth": "workspace:*",
+    "@coadvisor/billing": "workspace:*",
+    "@coadvisor/core-platform": "workspace:*",
+    "@coadvisor/crm": "workspace:*",
+    "@coadvisor/database": "workspace:*",
+    "@coadvisor/health-engine": "workspace:*",
+    "@coadvisor/notifications": "workspace:*",
+    "@coadvisor/signdoc": "workspace:*",
+    "@coadvisor/types": "workspace:*",
+    "pdf-lib": "1.17.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2",
+    "dotenv-cli": "^7.4.2",
+    "tsx": "^4.19.2"
+  }
+}

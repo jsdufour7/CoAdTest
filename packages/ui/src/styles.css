@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────
+   CoAdvisor Design System — tokens v2 (Sprint 1.5)
+   Direction « Confiance calme » : encre bleutée brand + accent
+   émeraude (santé financière). Prêt pour mode sombre via tokens.
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  /* Inter chargée via next/font dans chaque app (--font-inter) */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  /* Brand — bleu encre FinTech */
+  --color-brand-50: #eff5ff;
+  --color-brand-100: #dbe8fe;
+  --color-brand-200: #bfd7fe;
+  --color-brand-300: #93bbfd;
+  --color-brand-400: #6096fa;
+  --color-brand-500: #3b72f6;
+  --color-brand-600: #2554eb;
+  --color-brand-700: #1d42d8;
+  --color-brand-800: #1e38af;
+  --color-brand-900: #1e348a;
+  --color-brand-950: #172254;
+
+  /* Accent — émeraude (progression, santé financière, positif) */
+  --color-accent-50: #ecfdf5;
+  --color-accent-100: #d1fae5;
+  --color-accent-200: #a7f3d0;
+  --color-accent-300: #6ee7b7;
+  --color-accent-400: #34d399;
+  --color-accent-500: #10b981;
+  --color-accent-600: #059669;
+  --color-accent-700: #047857;
+  --color-accent-800: #065f46;
+  --color-accent-900: #064e3b;
+  --color-accent-950: #022c22;
+
+  /* Élévation douce FinTech */
+  --shadow-card:
+    0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.05);
+  --shadow-popover:
+    0 4px 12px rgb(15 23 42 / 0.08), 0 2px 4px rgb(15 23 42 / 0.04);
+
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Motion */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Pattern décoratif (panneaux de marque, héros) */
+@utility bg-dots {
+  background-image: radial-gradient(currentColor 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Respect des préférences de mouvement réduit */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

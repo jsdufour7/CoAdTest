@@ -1,0 +1,1316 @@
+// ─────────────────────────────────────────────────────────────
+// CoAdvisor — Schéma Core Platform (Sprint 1)
+// Domaines futurs (CRM, FHE, AI, Marketplace) : ajouter des modèles
+// ici en respectant tenantId + RLS + audit (voir ADR-003 / ADR-004).
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Runtime : rôle applicatif NOBYPASSRLS (RLS appliqué)
+  url       = env("DATABASE_URL")
+  // Migrations : rôle propriétaire (DDL uniquement)
+  directUrl = env("DIRECT_URL")
+}
+
+enum TenantType {
+  FIRM
+  INDEPENDENT_ADVISOR
+  ENTERPRISE
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum Role {
+  ADMIN
+  ADVISOR
+  ASSISTANT
+  CLIENT
+  COMPLIANCE_OFFICER
+}
+
+/// Organisation (cabinet, conseiller indépendant, entreprise).
+/// Racine de l'isolation multi-tenant.
+model Tenant {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  slug             String       @unique
+  type             TenantType   @default(FIRM)
+  status           TenantStatus @default(ACTIVE)
+  subscriptionPlan String       @default("free") @map("subscription_plan")
+  settings         Json         @default("{}")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  tenantUsers           TenantUser[]
+  auditLogs             AuditLog[]
+  clients               Client[]
+  advisorPublicProfiles AdvisorPublicProfile[]
+  documents             Document[]
+  documentShares        DocumentShare[]
+  documentSignatures    DocumentSignature[]
+  signatureTemplates    SignatureTemplate[]
+  clientLinks           ClientLink[]
+  billingSubscription   BillingSubscription?
+  billingInvoices       BillingInvoice[]
+  productEvents         ProductEvent[]
+  backupRuns            BackupRun[]
+
+  @@map("tenants")
+}
+
+/// Utilisateur de la plateforme (identité globale, inter-organisations).
+model User {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String     @unique
+  firstName    String     @map("first_name")
+  lastName     String     @map("last_name")
+  passwordHash String?    @map("password_hash")
+  status       UserStatus @default(ACTIVE)
+  // MFA prêt au niveau schéma (implémentation sprint ultérieur)
+  mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
+  mfaSecret    String?    @map("mfa_secret")
+  lastLoginAt  DateTime?  @map("last_login_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  tenantUsers         TenantUser[]
+  sessions            Session[]
+  advisorClients      Client[]              @relation("ClientAdvisor")
+  notes               Note[]                @relation("NoteAuthor")
+  publicProfile       AdvisorPublicProfile? @relation("AdvisorPublicProfile")
+  uploadedDocuments   Document[]            @relation("DocumentUploader")
+  createdShares       DocumentShare[]       @relation("ShareCreator")
+  requestedSignatures      DocumentSignature[]   @relation("SignatureRequester")
+  signatureSignerRows      SignatureSigner[]
+  createdSignatureTemplates SignatureTemplate[] @relation("SignatureTemplateCreator")
+  createdClientLinks       ClientLink[]          @relation("ClientLinkCreator")
+
+  @@map("users")
+}
+
+/// Association utilisateur ↔ organisation, porteuse du rôle (RBAC).
+model TenantUser {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String     @map("tenant_id") @db.Uuid
+  userId      String     @map("user_id") @db.Uuid
+  role        Role
+  permissions Json       @default("[]")
+  status      UserStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+  @@map("tenant_users")
+}
+
+/// Session auto-hébergée — seul le HACHÉ du jeton est stocké.
+model Session {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  ipAddress  String?   @map("ip_address")
+  userAgent  String?   @map("user_agent")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// Journal d'audit immuable (Loi 25 / LPRPDE / AMF).
+/// Écrit uniquement via recordAudit() dans la même transaction que
+/// la mutation auditée — jamais en UPDATE/DELETE (voir migration 0002).
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  oldData     Json?    @map("old_data")
+  newData     Json?    @map("new_data")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CoAdvisor — CRM Financial (Sprint 2)
+// Financial Life OS : le dossier client 360° du conseiller.
+// ─────────────────────────────────────────────────────────────
+
+enum ClientType {
+  INDIVIDUAL
+  FAMILY
+  CORPORATE
+}
+
+/// Lien inter-clients certifié par le professionnel (Sprint 7c, ADR-012).
+enum ClientLinkType {
+  CONJOINT
+  FAMILLE
+  AFFAIRES
+  PROCURATION
+  AUTRE
+}
+
+enum ClientStatus {
+  PROSPECT
+  ACTIVE
+  ARCHIVED
+}
+
+enum HouseholdRole {
+  SPOUSE
+  CHILD
+  PARENT
+  DEPENDENT
+  OTHER
+}
+
+enum TimelineEventType {
+  LIFE_EVENT
+  FINANCIAL_EVENT
+  MEETING
+  COMPLIANCE
+  DOCUMENT
+  GOAL
+}
+
+enum TimelineEventSource {
+  MANUAL
+  SYSTEM
+  IMPORT
+}
+
+enum NoteType {
+  MEETING
+  PHONE
+  EMAIL
+  OBSERVATION
+  TASK
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+/// Le dossier financier principal (PRD FR-CRM-001).
+model Client {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String       @map("tenant_id") @db.Uuid
+  advisorId String       @map("advisor_id") @db.Uuid
+  type      ClientType   @default(INDIVIDUAL)
+  status    ClientStatus @default(ACTIVE)
+  firstName String       @map("first_name")
+  lastName  String       @map("last_name")
+  email     String?
+  phone     String?
+  birthDate DateTime?    @map("birth_date")
+  metadata  Json         @default("{}")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  advisor           User               @relation(fields: [advisorId], references: [id], name: "ClientAdvisor")
+  familyMembers     FamilyMember[]
+  timelineEvents    TimelineEvent[]
+  notes             Note[]
+  tasks             Task[]
+  assets            Asset[]
+  liabilities       Liability[]
+  incomes           Income[]
+  expenses          Expense[]
+  insurancePolicies InsurancePolicy[]
+  financialGoals    FinancialGoal[]
+  retirementPlan    RetirementPlan?
+  financialContext  FinancialContext?
+  healthAssessments HealthAssessment[]
+  portalLinks       ClientPortalLink[]
+  copilotArtifacts  CopilotArtifact[]
+  documents         Document[]
+  clientLinksA      ClientLink[]       @relation("LinkA")
+  clientLinksB      ClientLink[]       @relation("LinkB")
+
+  @@index([tenantId, status])
+  @@index([tenantId, lastName])
+  @@index([advisorId])
+  @@map("clients")
+}
+
+/// Membre de la famille / entourage financier du client.
+model FamilyMember {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String        @map("tenant_id") @db.Uuid
+  clientId  String        @map("client_id") @db.Uuid
+  firstName String        @map("first_name")
+  lastName  String        @map("last_name")
+  role      HouseholdRole
+  birthDate DateTime?     @map("birth_date")
+  notes     String?
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("family_members")
+}
+
+/// Lien inter-clients certifié par le professionnel (Sprint 7c,
+/// ADR-012) : couple, famille, affaires, procuration. La paire est
+/// ordonnée (a < b) et unique par tenant ; créée/révoquée par un
+/// membre du cabinet exclusivement (RLS + audit), jamais exposée
+/// au portail ni au contexte public externe.
+model ClientLink {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String         @map("tenant_id") @db.Uuid
+  clientIdA   String         @map("client_id_a") @db.Uuid
+  clientIdB   String         @map("client_id_b") @db.Uuid
+  type        ClientLinkType
+  note        String?
+  createdById String         @map("created_by") @db.Uuid
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientA     Client @relation("LinkA", fields: [clientIdA], references: [id], onDelete: Cascade)
+  clientB     Client @relation("LinkB", fields: [clientIdB], references: [id], onDelete: Cascade)
+  createdBy   User   @relation("ClientLinkCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, clientIdA, clientIdB])
+  @@index([tenantId])
+  @@index([clientIdA])
+  @@index([clientIdB])
+  @@map("client_links")
+}
+
+/// Chronologie Financial Life OS (PRD FR-CRM-002) — historique préservé.
+model TimelineEvent {
+  id          String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String              @map("tenant_id") @db.Uuid
+  clientId    String              @map("client_id") @db.Uuid
+  eventType   TimelineEventType   @map("event_type")
+  title       String
+  description String?
+  eventDate   DateTime            @default(now()) @map("event_date")
+  source      TimelineEventSource @default(MANUAL)
+  createdBy   String?             @map("created_by") @db.Uuid
+  aiContext   Json?               @map("ai_context")
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId, eventDate])
+  @@map("timeline_events")
+}
+
+/// Notes professionnelles — toute modification est auditée (ADR-004).
+model Note {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  clientId  String   @map("client_id") @db.Uuid
+  authorId  String   @map("author_id") @db.Uuid
+  type      NoteType @default(OBSERVATION)
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id], name: "NoteAuthor")
+
+  @@index([tenantId])
+  @@index([clientId, createdAt])
+  @@map("notes")
+}
+
+/// Gestion des actions (suivis conseiller).
+model Task {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String       @map("tenant_id") @db.Uuid
+  clientId    String       @map("client_id") @db.Uuid
+  assignedTo  String?      @map("assigned_to") @db.Uuid
+  createdBy   String       @map("created_by") @db.Uuid
+  title       String
+  description String?
+  priority    TaskPriority @default(MEDIUM)
+  status      TaskStatus   @default(TODO)
+  dueDate     DateTime?    @map("due_date")
+  completedAt DateTime?    @map("completed_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([clientId])
+  @@map("tasks")
+}
+
+// ── Sprint 3 · FNAE (portée plateforme — ADR-006) ────────────
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  CONVERTED
+  DISMISSED
+}
+
+/// Analyse publique des besoins financiers (questionnaire anonyme).
+/// AUCUNE donnée tenant : lecture par capability token non devinable.
+model Assessment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  readToken      String   @unique @default(dbgenerated("gen_random_uuid()")) @map("read_token") @db.Uuid
+  source         String   @default("marketplace")
+  answers        Json
+  score          Int
+  categoryScores Json     @map("category_scores")
+  report         Json
+  engineVersion  String   @map("engine_version")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  leads Lead[]
+
+  @@map("assessments")
+}
+
+/// Lead généré par une analyse publique (consentement Loi 25 obligatoire).
+/// tenant_id NULL = boîte plateforme (matching Sprint 6) ;
+/// tenant_id renseigné = transmis directement au cabinet référent.
+model Lead {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String?    @map("tenant_id") @db.Uuid
+  assessmentId String?    @map("assessment_id") @db.Uuid
+  firstName    String     @map("first_name")
+  lastName     String     @map("last_name")
+  email        String
+  phone        String?
+  consent      Boolean    @default(false)
+  consentAt    DateTime?  @map("consent_at")
+  source       String     @default("marketplace")
+  status       LeadStatus @default(NEW)
+  clientId     String?    @map("client_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  assessment Assessment? @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+
+  marketplaceContact MarketplaceContactRequest?
+
+  @@index([tenantId, status])
+  @@index([assessmentId])
+  @@map("leads")
+}
+
+// ── Sprint 4 · Financial Health Engine (granulaire — ADR-007) ──
+
+enum AssetType {
+  CASH
+  INVESTMENT
+  REAL_ESTATE
+  BUSINESS
+  OTHER
+}
+
+enum LiabilityType {
+  MORTGAGE
+  LOAN
+  CREDIT_CARD
+  LINE_OF_CREDIT
+}
+
+enum MoneyFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  ANNUAL
+}
+
+enum ExpenseCategory {
+  HOUSING
+  FOOD
+  TRANSPORT
+  UTILITIES
+  INSURANCE
+  LEISURE
+  SAVINGS
+  OTHER
+}
+
+enum InsuranceType {
+  LIFE
+  DISABILITY
+  CRITICAL_ILLNESS
+  PROPERTY
+}
+
+enum GoalStatus {
+  ACTIVE
+  ACHIEVED
+  CANCELLED
+}
+
+enum GoalPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum RegisteredUsage {
+  NONE
+  PARTIAL
+  FULL
+  UNKNOWN
+}
+
+enum BeneficiariesStatus {
+  YES
+  NO
+  OUTDATED
+  UNKNOWN
+}
+
+enum HealthCategory {
+  LIQUIDITY
+  BUDGET
+  DEBT
+  SAVINGS
+  INVESTMENTS
+  RETIREMENT
+  TAX
+  INSURANCE
+  ESTATE
+  GOALS
+}
+
+enum HealthInsightType {
+  STRENGTH
+  RISK
+  OPPORTUNITY
+  ACTION
+}
+
+enum InsightSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum PortalLinkStatus {
+  INVITED
+  ACTIVE
+  REVOKED
+}
+
+/// Actifs (Data Architecture §5). registered = compte enregistré (REER/CELI…).
+model Asset {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  clientId    String    @map("client_id") @db.Uuid
+  type        AssetType
+  label       String
+  institution String?
+  value       Decimal   @db.Decimal(14, 2)
+  registered  Boolean   @default(false)
+  notes       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("assets")
+}
+
+/// Dettes (Data Architecture §5).
+model Liability {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String        @map("tenant_id") @db.Uuid
+  clientId       String        @map("client_id") @db.Uuid
+  type           LiabilityType
+  label          String
+  balance        Decimal       @db.Decimal(14, 2)
+  interestRate   Decimal?      @map("interest_rate") @db.Decimal(6, 3)
+  monthlyPayment Decimal       @map("monthly_payment") @db.Decimal(14, 2)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("liabilities")
+}
+
+/// Revenus (Data Architecture §5).
+model Income {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String         @map("tenant_id") @db.Uuid
+  clientId  String         @map("client_id") @db.Uuid
+  label     String
+  amount    Decimal        @db.Decimal(14, 2)
+  frequency MoneyFrequency @default(ANNUAL)
+  taxable   Boolean        @default(true)
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("incomes")
+}
+
+/// Dépenses (Data Architecture §5). La catégorie SAVINGS = effort d'épargne.
+model Expense {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String          @map("tenant_id") @db.Uuid
+  clientId  String          @map("client_id") @db.Uuid
+  category  ExpenseCategory
+  label     String?
+  amount    Decimal         @db.Decimal(14, 2)
+  frequency MoneyFrequency  @default(MONTHLY)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("expenses")
+}
+
+/// Assurances (Data Architecture §5). premium mensuel, coverage = capital.
+model InsurancePolicy {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String        @map("tenant_id") @db.Uuid
+  clientId  String        @map("client_id") @db.Uuid
+  type      InsuranceType
+  provider  String?
+  coverage  Decimal       @db.Decimal(14, 2)
+  premium   Decimal       @db.Decimal(14, 2)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("insurance_policies")
+}
+
+/// Objectifs financiers (Data Architecture §6).
+model FinancialGoal {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String       @map("tenant_id") @db.Uuid
+  clientId     String       @map("client_id") @db.Uuid
+  name         String
+  targetAmount Decimal      @map("target_amount") @db.Decimal(14, 2)
+  targetDate   DateTime?    @map("target_date")
+  priority     GoalPriority @default(MEDIUM)
+  status       GoalStatus   @default(ACTIVE)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId, status])
+  @@map("financial_goals")
+}
+
+/// Plan de retraite (Data Architecture §6) — un par client.
+model RetirementPlan {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  clientId           String   @unique @map("client_id") @db.Uuid
+  retirementAge      Int      @map("retirement_age")
+  targetAnnualIncome Decimal  @map("target_annual_income") @db.Decimal(14, 2)
+  notes              String?
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("retirement_plans")
+}
+
+/// Contexte fiscalité & succession (1:1 client) — données déclaratives
+/// qui alimentent les catégories TAX et ESTATE du FHI.
+model FinancialContext {
+  id                      String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId                String              @map("tenant_id") @db.Uuid
+  clientId                String              @unique @map("client_id") @db.Uuid
+  registeredAccountsUsage RegisteredUsage     @default(UNKNOWN) @map("registered_accounts_usage")
+  hasWill                 Boolean             @default(false) @map("has_will")
+  beneficiariesStatus     BeneficiariesStatus @default(UNKNOWN) @map("beneficiaries_status")
+  createdAt               DateTime            @default(now()) @map("created_at")
+  updatedAt               DateTime            @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("financial_contexts")
+}
+
+/// Snapshot FHI (Data Architecture §7) — IMMUABLE : jamais modifié,
+/// chaque calcul crée une nouvelle ligne (historique préservé, Règle 3).
+model HealthAssessment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  clientId       String   @map("client_id") @db.Uuid
+  score          Int
+  categoryScores Json     @map("category_scores")
+  ratios         Json
+  engineVersion  String   @map("engine_version")
+  calculatedBy   String?  @map("calculated_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  client   Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  insights HealthInsight[]
+  progress HealthProgress?
+
+  @@index([tenantId])
+  @@index([clientId, createdAt])
+  @@map("health_assessments")
+}
+
+/// Explications du score (FR-FHE-002) — rattachées à un snapshot.
+model HealthInsight {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  assessmentId   String            @map("assessment_id") @db.Uuid
+  type           HealthInsightType
+  category       HealthCategory?
+  severity       InsightSeverity   @default(LOW)
+  message        String
+  recommendation String?
+  aiGenerated    Boolean           @default(false) @map("ai_generated")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  assessment HealthAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([assessmentId])
+  @@map("health_insights")
+}
+
+/// Progression FHI entre deux snapshots (Data Architecture §7).
+model HealthProgress {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  clientId      String   @map("client_id") @db.Uuid
+  assessmentId  String   @unique @map("assessment_id") @db.Uuid
+  previousScore Int?     @map("previous_score")
+  newScore      Int      @map("new_score")
+  delta         Int?
+  changeReason  String?  @map("change_reason")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  assessment HealthAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId, createdAt])
+  @@map("health_progress")
+}
+
+/// Lien portail particulier ↔ dossier client CRM.
+/// Le code d'invitation est stocké HACHÉ (SHA-256) et affiché une seule
+/// fois au conseiller ; la revendication exige le consentement explicite.
+model ClientPortalLink {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String           @map("tenant_id") @db.Uuid
+  clientId       String           @map("client_id") @db.Uuid
+  userId         String?          @map("user_id") @db.Uuid
+  inviteCodeHash String           @unique @map("invite_code_hash")
+  status         PortalLinkStatus @default(INVITED)
+  invitedBy      String           @map("invited_by") @db.Uuid
+  claimedAt      DateTime?        @map("claimed_at")
+  consentAt      DateTime?        @map("consent_at")
+  revokedAt      DateTime?        @map("revoked_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId, status])
+  @@index([userId])
+  @@map("client_portal_links")
+}
+
+// ────────────────────────────────────────────────────────────────
+// SPRINT 5 — Advisor Intelligence (AI Copilot)
+// Artefacts immuables générés par le Copilot (résumé, préparation
+// de rencontre, suggestions, bilan client). Jamais d'UPDATE
+// (Règle 3) : régénérer = nouvelle ligne, provider + version
+// conservés pour traçabilité (codex-bridge | local-composer).
+// ────────────────────────────────────────────────────────────────
+
+enum CopilotArtifactKind {
+  SUMMARY
+  MEETING_PREP
+  SUGGESTIONS
+  CLIENT_REPORT
+}
+
+/// Artefact Copilot — contenu généré (Markdown) + données structurées
+/// optionnelles (suggestions actionnables) + provenance affichée en UI.
+model CopilotArtifact {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  clientId        String              @map("client_id") @db.Uuid
+  kind            CopilotArtifactKind
+  /// Texte Markdown prêt à afficher (échappé côté rendu).
+  content         String
+  /// Données structurées (ex. suggestions[{title, rationale, category}]).
+  structured      Json?
+  provider        String              @default("local-composer")
+  model           String              @default("composer-1.0")
+  composerVersion String              @default("copilot-1.0") @map("composer_version")
+  /// true = la passerelle était configurée mais indisponible → secours.
+  fellBack        Boolean             @default(false) @map("fell_back")
+  latencyMs       Int?                @map("latency_ms")
+  generatedBy     String              @map("generated_by") @db.Uuid
+  createdAt       DateTime            @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([clientId, kind, createdAt])
+  @@map("copilot_artifacts")
+}
+
+// ────────────────────────────────────────────────────────────────
+// SPRINT 6 — Marketplace (annuaire public + matching, ADR-009)
+// Annuaire OPT-IN : un profil n'est public que si is_listed = true
+// (consentement horodaté listed_at, Loi 25). Matching déterministe
+// mktmatch-1.0 croisant priorités FNAE ↔ spécialités déclarées.
+// ────────────────────────────────────────────────────────────────
+
+enum MarketplaceSpecialty {
+  EMERGENCY_FUND
+  DEBT
+  SAVINGS
+  RETIREMENT
+  PROTECTION
+  GOALS
+}
+
+/// Profil professionnel public d'un conseiller (opt-in, 1 par utilisateur).
+/// Les certifications sont DÉCLARATIVES — jamais vérifiées par CoAdvisor
+/// (avertissement affiché publiquement).
+model AdvisorPublicProfile {
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String                 @map("tenant_id") @db.Uuid
+  advisorId       String                 @unique @map("advisor_id") @db.Uuid
+  displayName     String                 @map("display_name")
+  headline        String?
+  bio             String?
+  regions         String[]
+  languages       String[]
+  specialties     MarketplaceSpecialty[]
+  yearsExperience Int?                   @map("years_experience")
+  credentialsText String?                @map("credentials_text")
+  /// DEPRECATED Sprint 8 — la photo vit désormais dans le coffre
+  /// chiffré (colonnes photo_* ci-dessous) ; conservée le temps du
+  /// basculement, vidée par le script de reprise.
+  photoData       String?                @map("photo_data")
+  photoStorageKey String?                @map("photo_storage_key")
+  photoSha256     String?                @map("photo_sha256")
+  photoSizeBytes  Int?                   @map("photo_size_bytes")
+  photoMimeType   String?                @map("photo_mime_type")
+  photoContentTag String?                @map("photo_content_tag")
+  isListed        Boolean                @default(false) @map("is_listed")
+  listedAt        DateTime?              @map("listed_at")
+  unlistedAt      DateTime?              @map("unlisted_at")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+
+  tenant          Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  advisor         User                        @relation(fields: [advisorId], references: [id], name: "AdvisorPublicProfile")
+  contactRequests MarketplaceContactRequest[]
+
+  @@index([tenantId])
+  @@index([isListed])
+  @@map("advisor_public_profiles")
+}
+
+/// Demande de contact prospect → conseiller (preuve marketplace).
+/// Immutable côté applicatif : ni UPDATE ni DELETE (journal de preuve).
+model MarketplaceContactRequest {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  profileId     String    @map("profile_id") @db.Uuid
+  leadId        String?   @unique @map("lead_id") @db.Uuid
+  prospectName  String    @map("prospect_name")
+  prospectEmail String    @map("prospect_email")
+  prospectPhone String?   @map("prospect_phone")
+  message       String
+  consent       Boolean   @default(false)
+  consentAt     DateTime? @map("consent_at")
+  matchScore    Int?      @map("match_score")
+  matchReasons  Json?     @map("match_reasons")
+  engineVersion String    @default("mktmatch-1.0") @map("engine_version")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  profile AdvisorPublicProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  lead    Lead?                @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([profileId, createdAt])
+  @@map("marketplace_contact_requests")
+}
+
+// ────────────────────────────────────────────────────────────────
+// SPRINT 7 — Documents & Compliance (ADR-010)
+// Coffre chiffré côté serveur (AES-256-GCM en streaming, haché
+// SHA-256 du contenu en clair), signature électronique interne
+// horodatée (nom tapé + consentement + certificat de preuve
+// fusionné au PDF signé), partage portail et lien public révocable
+// (capability token haché), export de données (Loi 25).
+// ────────────────────────────────────────────────────────────────
+
+enum DocumentCategory {
+  JUSTIFICATIF
+  RELEVE
+  AVIS_COTISATION
+  IDENTITE
+  CONTRAT
+  RAPPORT
+  AUTRE
+}
+
+enum DocumentStatus {
+  ACTIVE
+  DELETED
+}
+
+enum DocumentShareChannel {
+  PORTAL
+  LINK
+}
+
+enum DocumentSignatureStatus {
+  REQUESTED
+  PARTIALLY_SIGNED
+  SIGNED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+/// Sprint 7b — ordre de passage des signataires (ADR-011).
+enum SigningMode {
+  SEQUENTIAL
+  PARALLEL
+}
+
+enum SignatureSignerKind {
+  PORTAL_USER
+  STAFF
+  EXTERNAL
+}
+
+enum SignatureSignerStatus {
+  PENDING
+  SIGNED
+  DECLINED
+}
+
+enum SignatureFieldKind {
+  SIGNATURE
+  INITIALS
+  DATE
+}
+
+/// Pièce du coffre d'un dossier client. Le binaire chiffré vit hors
+/// base (stockage objet local — contrat prêt pour S3) ; seules les
+/// métadonnées et les preuves d'intégrité sont persistées ici.
+/// Suppression = statut DELETED (purge disque) + audit, jamais
+/// d'effacement silencieux des métadonnées.
+model Document {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String           @map("tenant_id") @db.Uuid
+  clientId         String           @map("client_id") @db.Uuid
+  uploadedById     String           @map("uploaded_by_id") @db.Uuid
+  category         DocumentCategory @default(AUTRE)
+  label            String
+  originalFilename String           @map("original_filename")
+  mimeType         String           @map("mime_type")
+  sizeBytes        Int              @map("size_bytes")
+  /// SHA-256 hex du contenu CHIFFRÉ N/A — hash du contenu en clair (preuve d'intégrité signable).
+  sha256           String
+  /// Tag d'authentification AES-256-GCM (base64, 16 o).
+  contentTag       String           @map("content_tag")
+  /// Clé relative dans le répertoire de stockage (jamais de chemin absolu persisté).
+  storageKey       String           @map("storage_key")
+  status           DocumentStatus   @default(ACTIVE)
+  deletedAt        DateTime?        @map("deleted_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client     Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  uploadedBy User   @relation(name: "DocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  shares            DocumentShare[]
+  signatureRequests DocumentSignature[] @relation("SignatureOriginalDocument")
+  signedCopies      DocumentSignature[] @relation("SignatureSignedDocument")
+
+  @@index([tenantId, clientId, status])
+  @@map("documents")
+}
+
+/// Partage d'une pièce : canal PORTAL (visible du particulier lié,
+/// consentement déjà matérialisé par le lien portail) ou LINK
+/// (capability token SHA-256, expiration 7 jours, révocable).
+model DocumentShare {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String               @map("tenant_id") @db.Uuid
+  documentId     String               @map("document_id") @db.Uuid
+  channel        DocumentShareChannel
+  /// Haché SHA-256 hex du jeton de lien (jamais le jeton en clair).
+  tokenHash      String?              @unique @map("token_hash")
+  expiresAt      DateTime?            @map("expires_at")
+  revokedAt      DateTime?            @map("revoked_at")
+  lastAccessedAt DateTime?            @map("last_accessed_at")
+  accessCount    Int                  @default(0) @map("access_count")
+  createdById    String               @map("created_by_id") @db.Uuid
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document  Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy User     @relation(name: "ShareCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([documentId, revokedAt])
+  @@map("document_shares")
+}
+
+/// Demande/signature électronique horodatée (art. 2827 C.c.Q.) :
+/// le lien entre le signataire et le document est assuré par le nom
+/// tapé, le consentement tracé, l'horodatage, l'IP et le haché
+/// SHA-256 du PDF signé (certificat de preuve fusionné).
+/// Sprint 7b — ENVELOPPE de signature multi-signataires (ADR-011).
+/// Une enveloppe regroupe N signataires (couple portail, conseiller,
+/// externe par courriel) et leurs champs positionnés ; elle se conclut
+/// (SIGNED) quand tous ont signé, ou se clôt sur refus/expiration/
+/// annulation. Le certificat de preuve liste alors chaque signataire.
+model DocumentSignature {
+  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String                  @map("tenant_id") @db.Uuid
+  documentId     String                  @map("document_id") @db.Uuid
+  status         DocumentSignatureStatus @default(REQUESTED)
+  /// SEQUENTIAL : chacun signe à son tour (sort_order) ; PARALLEL : libre.
+  signingMode    SigningMode             @default(SEQUENTIAL) @map("signing_mode")
+  /// Mot du conseiller affiché aux signataires (page + courriel d'avis).
+  message        String?
+  /// Échéance de l'enveloppe (règle EXPIRED paresseuse à la lecture).
+  expiresAt      DateTime?               @map("expires_at")
+  requestedById  String                  @map("requested_by_id") @db.Uuid
+  requestedAt    DateTime                @default(now()) @map("requested_at")
+  /// Horodatage de complétion (dernier signataire).
+  signedAt       DateTime?               @map("signed_at")
+  cancelledAt    DateTime?               @map("cancelled_at")
+  declinedAt     DateTime?               @map("declined_at")
+  expiredAt      DateTime?               @map("expired_at")
+  lastReminderAt DateTime?               @map("last_reminder_at")
+  reminderCount  Int                     @default(0) @map("reminder_count")
+  /// SHA-256 hex du PDF final (champs estampillés + certificat fusionné).
+  proofSha256    String?                 @map("proof_sha256")
+  signedDocumentId String?               @unique @map("signed_document_id") @db.Uuid
+  /// Enveloppe d'origine si « nouvel envoi » (Sprint 7c) — traçabilité.
+  resentFromId   String?                 @map("resent_from_id") @db.Uuid
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  document       Document         @relation(name: "SignatureOriginalDocument", fields: [documentId], references: [id], onDelete: Cascade)
+  signedDocument Document?        @relation(name: "SignatureSignedDocument", fields: [signedDocumentId], references: [id], onDelete: SetNull)
+  requestedBy    User             @relation(name: "SignatureRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  resentFrom     DocumentSignature?  @relation("EnvelopeResend", fields: [resentFromId], references: [id], onDelete: SetNull)
+  resentTo       DocumentSignature[] @relation("EnvelopeResend")
+  signers        SignatureSigner[]
+  fields         SignatureField[]
+
+  @@index([tenantId])
+  @@index([documentId, status])
+  @@map("document_signatures")
+}
+
+/// Signataire d'une enveloppe — la machine à états RLS vit ICI :
+/// le signataire (portail authentifié ou externe à jeton) ne peut
+/// transiter que SA propre ligne PENDING, avec dépôt de preuves
+/// complet en WITH CHECK (nom, consentement, horodatage, IP/UA).
+model SignatureSigner {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String                @map("tenant_id") @db.Uuid
+  signatureId   String                @map("signature_id") @db.Uuid
+  kind          SignatureSignerKind
+  /// Compte portail (PORTAL_USER) ou membre du cabinet (STAFF).
+  userId        String?               @map("user_id") @db.Uuid
+  /// Destinataire des avis/relances (tous canaux — requis).
+  email         String
+  /// Nom affiché tel que connu à la création de l'enveloppe.
+  fullName      String                @map("full_name")
+  /// Ordre de passage en mode SEQUENTIAL (0, 1, 2…).
+  sortOrder     Int                   @default(0) @map("sort_order")
+  status        SignatureSignerStatus @default(PENDING)
+  /// Jeton capability du lien courriel (EXTERNAL) — SHA-256 hex du clair.
+  tokenHash     String?               @unique @map("token_hash")
+  /// Preuves déposées à la signature.
+  signerName    String?               @map("signer_name")
+  signedAt      DateTime?             @map("signed_at")
+  ipAddress     String?               @map("ip_address")
+  userAgent     String?               @map("user_agent")
+  consentText   String?               @map("consent_text")
+  initialsText  String?               @map("initials_text")
+  /// Style adopté à la signature — registre @coadvisor/signdoc (Sprint 7c).
+  signatureStyle String?              @map("signature_style")
+  /// PNG de la signature tracée (facultative).
+  drawnPng      Bytes?                @map("drawn_png")
+  declineReason String?               @map("decline_reason")
+  declinedAt    DateTime?             @map("declined_at")
+  remindedAt    DateTime?             @map("reminded_at")
+
+  signature DocumentSignature @relation(fields: [signatureId], references: [id], onDelete: Cascade)
+  user      User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fields    SignatureField[]
+
+  @@index([tenantId])
+  @@index([signatureId, sortOrder])
+  @@index([userId, status])
+  @@map("signature_signers")
+}
+
+/// Champ positionné façon DocuSign : zone normalisée (0-1, origine
+/// haut-gauche de la page) estampillée au moment de la complétion.
+model SignatureField {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String             @map("tenant_id") @db.Uuid
+  signatureId String             @map("signature_id") @db.Uuid
+  signerId    String             @map("signer_id") @db.Uuid
+  pageIndex   Int                @map("page_index")
+  kind        SignatureFieldKind
+  x           Float
+  y           Float
+  width       Float
+  height      Float
+
+  signature DocumentSignature @relation(fields: [signatureId], references: [id], onDelete: Cascade)
+  signer    SignatureSigner   @relation(fields: [signerId], references: [id], onDelete: Cascade)
+
+  @@index([signatureId])
+  @@map("signature_fields")
+}
+
+/// Gabarit de champs réutilisable (ex. : mandat type à deux signataires).
+model SignatureTemplate {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String
+  /// Disposition JSON : [{ signerIndex, kind, pageIndex, x, y, width, height }].
+  fields      Json
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User   @relation(name: "SignatureTemplateCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@map("signature_templates")
+}
+
+// ────────────────────────────────────────────────────────────────
+// SPRINT 8 — SaaS Commercialization (ADR-013/014/015)
+// Plans & facturation Stripe/simulateur, événements produit
+// first-party (Loi 25), sauvegardes répliquées S3 Canada,
+// photo marketplace vers le coffre chiffré.
+// ────────────────────────────────────────────────────────────────
+
+/// Qui a traité le paiement : simulateur local (dév) ou Stripe (prod).
+enum BillingProvider {
+  SIMULATOR
+  STRIPE
+}
+
+enum BillingSubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+/// Les transitions légitimes (OPEN → PAID/VOID) passent par UPDATE en
+/// transaction auditée ; jamais de DELETE (REVOKE en migration).
+enum BillingInvoiceStatus {
+  OPEN
+  PAID
+  VOID
+}
+
+enum ProductEventActorKind {
+  STAFF
+  PORTAL
+  EXTERNAL
+  ANONYMOUS
+  SYSTEM
+}
+
+enum BackupTrigger {
+  MANUAL
+  SCHEDULED
+}
+
+enum BackupDestination {
+  LOCAL
+  S3
+  BOTH
+}
+
+/// On n'écrit une ligne qu'à l'issue du cycle : succès vérifié ou échec.
+enum BackupRunStatus {
+  VERIFIED
+  FAILED
+}
+
+/// Abonnement SaaS d'un cabinet (ADR-013). Le catalogue des paliers
+/// vit dans @coadvisor/billing (plans.ts) — la colonne reste un texte
+/// pour permettre l'évolution des paliers sans migration.
+model BillingSubscription {
+  id                     String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId               String                     @unique @map("tenant_id") @db.Uuid
+  planCode               String                     @map("plan_code")
+  status                 BillingSubscriptionStatus  @default(ACTIVE)
+  /// Sièges facturés au-delà des inclus du palier (Cabinet).
+  seatsExtra             Int                        @default(0) @map("seats_extra")
+  provider               BillingProvider            @default(SIMULATOR)
+  providerCustomerId     String?                    @map("provider_customer_id")
+  providerSubscriptionId String?                    @map("provider_subscription_id")
+  currentPeriodStart     DateTime                   @map("current_period_start")
+  currentPeriodEnd       DateTime                   @map("current_period_end")
+  cancelAtPeriodEnd      Boolean                    @default(false) @map("cancel_at_period_end")
+  engineVersion          String                     @default("billing-1.0") @map("engine_version")
+  createdAt              DateTime                   @default(now()) @map("created_at")
+  updatedAt              DateTime                   @updatedAt @map("updated_at")
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices BillingInvoice[]
+
+  @@map("billing_subscriptions")
+}
+
+/// Facture mensuelle émise à l'activation/changement de palier.
+/// number : CA-<année>-<séquence> ; lines : JSON (libellés FR, montants).
+model BillingInvoice {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String               @map("tenant_id") @db.Uuid
+  subscriptionId    String               @map("subscription_id") @db.Uuid
+  number            String               @unique
+  planCode          String               @map("plan_code")
+  seatsBilled       Int                  @default(0) @map("seats_billed")
+  amountCents       Int                  @map("amount_cents")
+  currency          String               @default("CAD")
+  status            BillingInvoiceStatus @default(PAID)
+  periodStart       DateTime             @map("period_start")
+  periodEnd         DateTime             @map("period_end")
+  issuedAt          DateTime             @default(now()) @map("issued_at")
+  paidAt            DateTime?            @map("paid_at")
+  providerInvoiceId String?              @map("provider_invoice_id")
+  lines             Json                 @default("[]")
+  engineVersion     String               @default("billing-1.0") @map("engine_version")
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscription BillingSubscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, issuedAt])
+  @@map("billing_invoices")
+}
+
+/// Événement produit first-party (ADR-014) : mesure d'usage hébergée
+/// chez nous, pseudonymisée (sessionHash non réversible), jamais
+/// transmise à un tiers. INSERT/SELECT seulement (REVOKE en migration).
+model ProductEvent {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String                @map("tenant_id") @db.Uuid
+  occurredAt    DateTime              @default(now()) @map("occurred_at")
+  app           String
+  actorKind     ProductEventActorKind @map("actor_kind")
+  actorId       String?               @map("actor_id") @db.Uuid
+  sessionHash   String?               @map("session_hash")
+  name          String
+  props         Json                  @default("{}")
+  engineVersion String                @default("analytics-1.0") @map("engine_version")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, occurredAt])
+  @@index([name, occurredAt])
+  @@map("product_events")
+}
+
+/// Compte rendu d'un cycle de sauvegarde/réplication des blobs (ADR-015) :
+/// inventaire manifeste + vérification sha256 à destination. La ligne est
+/// écrite à l'issue (VERIFIED | FAILED) — INSERT/SELECT seulement.
+model BackupRun {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  trigger        BackupTrigger     @default(MANUAL)
+  destination    BackupDestination
+  status         BackupRunStatus
+  startedAt      DateTime          @map("started_at")
+  finishedAt     DateTime          @map("finished_at")
+  blobCount      Int               @default(0) @map("blob_count")
+  copiedCount    Int               @default(0) @map("copied_count")
+  bytesTotal     Int               @default(0) @map("bytes_total")
+  manifestSha256 String?           @map("manifest_sha256")
+  report         Json              @default("{}")
+  error          String?
+  engineVersion  String            @default("backup-1.0") @map("engine_version")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("backup_runs")
+}

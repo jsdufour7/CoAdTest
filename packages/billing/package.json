@@ -1,0 +1,34 @@
+{
+  "name": "@coadvisor/billing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monétisation SaaS (ADR-013) — catalogue des paliers, droits & quotas par palier, facturation CAD (TPS/TVQ), port paiement Stripe + simulateur local, sièges",
+  "exports": {
+    ".": "./src/index.ts",
+    "./plans": "./src/plans.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seed:demo": "dotenv -e ../../.env -- tsx scripts/seed-demo-billing.ts"
+  },
+  "dependencies": {
+    "@coadvisor/analytics": "workspace:*",
+    "@coadvisor/auth": "workspace:*",
+    "@coadvisor/core-platform": "workspace:*",
+    "@coadvisor/database": "workspace:*",
+    "@coadvisor/types": "workspace:*",
+    "pdf-lib": "^1.17.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "dotenv-cli": "^7.4.2",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2",
+    "@types/node": "^22.10.2"
+  }
+}

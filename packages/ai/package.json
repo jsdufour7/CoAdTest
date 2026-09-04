@@ -1,0 +1,27 @@
+{
+  "name": "@coadvisor/ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Advisor Intelligence — LLM Gateway multi-providers (codex-bridge → passerelle locale compatible OpenAI · fallback composer déterministe), AI Copilot (IA assistive, Loi 25)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@coadvisor/auth": "workspace:*",
+    "@coadvisor/core-platform": "workspace:*",
+    "@coadvisor/database": "workspace:*",
+    "@coadvisor/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2",
+    "@types/node": "^22.10.2"
+  }
+}

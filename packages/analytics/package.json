@@ -1,0 +1,26 @@
+{
+  "name": "@coadvisor/analytics",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Analytics produit first-party (ADR-014) — événements d'usage hébergés en BD, pseudonymisés, zérotiers (Loi 25), agrégations tableaux de bord",
+  "exports": {
+    ".": "./src/index.ts",
+    "./pure": "./src/aggregate.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@coadvisor/database": "workspace:*",
+    "@coadvisor/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2",
+    "@types/node": "^22.10.2"
+  }
+}

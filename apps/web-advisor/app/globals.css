@@ -1,0 +1,8 @@
+@import "@coadvisor/ui/styles.css";
+
+/* Analyse des classes du design system partagé */
+@source "../../../packages/ui/src";
+
+body {
+  @apply min-h-screen bg-slate-50 text-slate-900 antialiased;
+}

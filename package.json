@@ -1,0 +1,36 @@
+{
+  "name": "coadvisor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CoAdvisor — Financial Intelligence Operating System (TwoDots.ca Ecosystem)",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:advisor": "pnpm --filter @coadvisor/web-advisor dev",
+    "dev:client": "pnpm --filter @coadvisor/web-client dev",
+    "dev:marketplace": "pnpm --filter @coadvisor/web-marketplace dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:db": "RUN_DB_TESTS=1 turbo run test",
+    "test:e2e": "playwright test",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter @coadvisor/database generate",
+    "db:migrate": "pnpm --filter @coadvisor/database migrate",
+    "db:migrate:dev": "pnpm --filter @coadvisor/database migrate:dev",
+    "db:seed": "pnpm --filter @coadvisor/database seed",
+    "postinstall": "pnpm run db:generate",
+    "db:seed:demo": "pnpm --filter @coadvisor/documents seed:demo && pnpm --filter @coadvisor/billing seed:demo"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  }
+}

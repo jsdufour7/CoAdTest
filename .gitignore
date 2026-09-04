@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Builds
+.next/
+out/
+dist/
+.turbo/
+
+# Tests
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Environnement (ne jamais committer de secrets)
+.env
+.env.*
+!.env.example
+
+# Système
+.DS_Store
+
+# Coffre documentaire local chiffré (Sprint 7)
+var/

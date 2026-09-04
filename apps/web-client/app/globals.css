@@ -1,0 +1,7 @@
+@import "@coadvisor/ui/styles.css";
+
+@source "../../../packages/ui/src";
+
+body {
+  @apply min-h-screen bg-slate-50 text-slate-900 antialiased;
+}

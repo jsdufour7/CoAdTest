@@ -1,0 +1,48 @@
+{
+  "name": "@coadvisor/web-advisor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CoAdvisor — Application conseillers et cabinets",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@coadvisor/ai": "workspace:*",
+    "@coadvisor/analytics": "workspace:*",
+    "@coadvisor/auth": "workspace:*",
+    "@coadvisor/billing": "workspace:*",
+    "@coadvisor/core-platform": "workspace:*",
+    "@coadvisor/crm": "workspace:*",
+    "@coadvisor/database": "workspace:*",
+    "@coadvisor/documents": "workspace:*",
+    "@coadvisor/fnae": "workspace:*",
+    "@coadvisor/health-engine": "workspace:*",
+    "@coadvisor/marketplace": "workspace:*",
+    "@coadvisor/signdoc": "workspace:*",
+    "@coadvisor/types": "workspace:*",
+    "@coadvisor/ui": "workspace:*",
+    "@prisma/client": "^6.2.1",
+    "argon2": "^0.41.1",
+    "dotenv": "^16.4.7",
+    "lucide-react": "^0.469.0",
+    "next": "^15.1.6",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "eslint": "^9.17.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.2"
+  }
+}

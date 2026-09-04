@@ -1,0 +1,24 @@
+{
+  "name": "@coadvisor/notifications",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Notifications — port d'envoi d'e-mails multi-providers (journal local déterministe par défaut · Resend activable par env), aucune dépendance externe",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@coadvisor/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2",
+    "@types/node": "^22.10.2"
+  }
+}

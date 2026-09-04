@@ -1,0 +1,25 @@
+name: coadvisor
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: coadvisor-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: coadvisor
+    ports:
+      - "5432:5432"
+    volumes:
+      - coadvisor-pgdata:/var/lib/postgresql/data
+      # Crée le rôle applicatif NOBYPASSRLS au premier démarrage (voir ADR-003)
+      - ./docker/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d coadvisor"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  coadvisor-pgdata:

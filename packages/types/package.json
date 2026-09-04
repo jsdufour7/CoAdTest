@@ -1,0 +1,18 @@
+{
+  "name": "@coadvisor/types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Types et contrats partagés entre les modules CoAdvisor",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2"
+  }
+}

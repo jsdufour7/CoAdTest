@@ -1,0 +1,31 @@
+{
+  "name": "@coadvisor/signdoc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Signdoc — moteur de signature électronique autonome (enveloppes multi-signataires, estampillage façon DocuSign, certificat de preuve). Entity commercialisable : logique exposée par API typée, ports injectés (ADR-012).",
+  "exports": {
+    ".": "./src/index.ts",
+    "./labels": "./src/labels.ts",
+    "./pure": "./src/pure.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@coadvisor/auth": "workspace:*",
+    "@coadvisor/database": "workspace:*",
+    "@coadvisor/types": "workspace:*",
+    "@pdf-lib/fontkit": "1.1.1",
+    "pdf-lib": "1.17.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@coadvisor/config": "workspace:*",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.2"
+  }
+}
